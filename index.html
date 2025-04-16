@@ -1,7 +1,35 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GitHub Pages Frontend with AWS Lambda Backend</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    #data { margin-top: 1em; padding: 1em; border: 1px solid #ccc; }
+  </style>
+</head>
 <body>
-<h1>Hello World</h1>
-<p>I'm hosted with GitHub Pages.</p>
+  <h1>Welcome to My App</h1>
+  <button id="fetchData">Fetch Data from AWS Lambda API</button>
+  <div id="data"></div>
+
+  <script>
+    // Replace with your API Gateway endpoint URL once deployed
+    const apiEndpoint = 'https://your-api-id.execute-api.region.amazonaws.com/prod/hello';
+
+    document.getElementById('fetchData').addEventListener('click', async () => {
+      try {
+        const response = await fetch(apiEndpoint);
+        if (!response.ok) {
+          throw new Error('Network response was not OK');
+        }
+        const result = await response.json();
+        document.getElementById('data').innerText = JSON.stringify(result, null, 2);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        document.getElementById('data').innerText = 'Error fetching data. See console for details.';
+      }
+    });
+  </script>
 </body>
 </html>
