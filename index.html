@@ -8,6 +8,26 @@
     input, button { margin-top: 1em; display: block; }
     #downloadAllBtn { display: none; font-weight: bold; margin-bottom: 1em; }
     #downloads a { display: block; margin-top: 0.5em; }
+    #loading {
+      display: none;
+      margin-top: 1em;
+      font-style: italic;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3498db;
+      border-radius: 50%;
+      width: 14px;
+      height: 14px;
+      display: inline-block;
+      animation: spin 1s linear infinite;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -15,6 +35,9 @@
   <input type="file" id="excelFile" accept=".xlsx">
   <input type="text" id="sheetName" placeholder="Sheet Name (e.g., Energiesnoeier)">
   <button id="submitBtn">Process File</button>
+
+  <!-- Loading indicator -->
+  <div id="loading">Processing<span class="spinner"></span></div>
 
   <!-- Download All button -->
   <button id="downloadAllBtn">Download All as ZIP</button>
@@ -31,6 +54,7 @@
     }
 
     function handleFiles(files, zipFile) {
+      document.getElementById('loading').style.display = 'none';
       const dl = document.getElementById('downloads');
       dl.innerHTML = '<h2>Download Your Files</h2>';
 
@@ -74,18 +98,29 @@
 
     document.getElementById('submitBtn').addEventListener('click', async () => {
       document.getElementById('downloadAllBtn').style.display = 'none';
+      document.getElementById('downloads').innerHTML = '';
+      document.getElementById('loading').style.display = 'block';
+
       const fileEl = document.getElementById('excelFile');
       const sheet  = document.getElementById('sheetName').value.trim();
-      if (!fileEl.files[0] || !sheet) return alert('Select file and sheet name');
+      if (!fileEl.files[0] || !sheet) {
+        document.getElementById('loading').style.display = 'none';
+        return alert('Select file and sheet name');
+      }
 
       const base64 = await fileToBase64(fileEl.files[0]);
       const payload = { file_data: base64, file_name: fileEl.files[0].name, sheet_name: sheet };
 
-      const res = await fetch('https://yspwkqu7s9.execute-api.eu-central-1.amazonaws.com/prod/hello', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const json = await res.json();
-      handleFiles(json.files, json.zip_file);
+      try {
+        const res = await fetch('https://yspwkqu7s9.execute-api.eu-central-1.amazonaws.com/prod/hello', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const json = await res.json();
+        handleFiles(json.files, json.zip_file);
+      } catch (err) {
+        console.error('Error:', err);
+        document.getElementById('loading').style.display = 'none';
+      }
     });
   </script>
 </body>
