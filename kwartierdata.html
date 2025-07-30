@@ -1,129 +1,156 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="nl">
 <head>
   <meta charset="UTF-8">
+  <title>Kwartierdata Export (Lokale Datum/Tijd)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kwartierdata Export</title>
-  <!-- SheetJS for Excel export -->
+  <!-- SheetJS voor Excel-export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 2rem auto;
-      padding: 1rem;
-    }
-    label, select, input, button {
-      display: block;
-      margin: 0.5rem 0;
-    }
-    button {
-      padding: 0.5rem 1rem;
-      font-size: 1rem;
-    }
-    #debug {
-      white-space: pre-wrap;
-      background: #f9f9f9;
-      border: 1px solid #ddd;
-      padding: 0.5rem;
-      margin-top: 1rem;
-      color: #444;
-      font-size: 0.9rem;
-    }
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+    label, input, select, button { display: block; margin: 0.5rem 0; }
+    input[type="text"], input[type="number"] { width: 160px; }
+    button { padding: 0.5rem 1rem; }
+    #status { margin-top:1rem; color: #555; font-style: italic; }
   </style>
 </head>
 <body>
   <h1>Kwartierdata Export</h1>
 
-  <label for="ean">EAN:</label>
-  <input id="ean" placeholder="871687120057248244">
+  <label>EAN(s) (komma‑gescheiden):
+    <input id="ean" placeholder="871687120057248244,871687120057248245">
+  </label>
 
-  <label for="start">Start:</label>
-  <input id="start" type="datetime-local">
+  <label>Startdatum (YYYYMMDD):
+    <input id="start" type="text" placeholder="20250227" pattern="\d{8}" value="20250227">
+  </label>
 
-  <label for="end">End:</label>
-  <input id="end" type="datetime-local">
+  <label>Einddatum (YYYYMMDD):
+    <input id="end"   type="text" placeholder="20250228" pattern="\d{8}" value="20250228">
+  </label>
 
-  <label for="type">Type aansluiting:</label>
-  <select id="type">
-    <option>Elektriciteit</option>
-    <option>Gas</option>
-  </select>
+  <label>Type aansluiting:
+    <select id="type">
+      <option>Elektriciteit</option>
+      <option>Gas</option>
+    </select>
+  </label>
 
-  <label for="direction">Direction:</label>
-  <select id="direction">
-    <option>Levering</option>
-    <option>Teruglevering</option>
-  </select>
+  <label>Richting:
+    <select id="direction">
+      <option>Levering</option>
+      <option>Teruglevering</option>
+    </select>
+  </label>
+
+  <label>Testmodus (eerste N rijen, leeg voor alle data):
+    <input id="limit" type="number" placeholder="5" value="5">
+  </label>
 
   <button id="download">Download Excel</button>
-
-  <div id="debug"></div>
+  <div id="status"></div>
 
   <script>
-    const dbgEl = document.getElementById('debug');
-    function debug(msg) {
-      console.log(msg);
-      dbgEl.textContent += msg + "\n";
+    const btn    = document.getElementById('download');
+    const status = document.getElementById('status');
+
+    // Parse "YYYYMMDD" into a UTC Date at 00:00
+    function parseYYYYMMDD(s) {
+      const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+      return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 0, 0, 0)) : null;
     }
 
-    document.getElementById('download').onclick = async () => {
-      dbgEl.textContent = ''; // clear previous debug
+    btn.addEventListener('click', async () => {
+      status.textContent = '';
+      btn.disabled = true;
+
+      const eans      = document.getElementById('ean').value.trim();
+      const startRaw  = document.getElementById('start').value.trim();
+      const endRaw    = document.getElementById('end').value.trim();
+      const type      = document.getElementById('type').value;
+      const direction = document.getElementById('direction').value;
+      const limit     = document.getElementById('limit').value.trim();
+
+      // Validatie
+      if (!eans || !startRaw || !endRaw) {
+        status.textContent = '❗ Vul EAN(s), start- en einddatum in.';
+        btn.disabled = false;
+        return;
+      }
+      const startDt = parseYYYYMMDD(startRaw);
+      const endDt0  = parseYYYYMMDD(endRaw);
+      if (!startDt || !endDt0) {
+        status.textContent = '❗ Datums moeten in YYYYMMDD-vorm zijn.';
+        btn.disabled = false;
+        return;
+      }
+
+      // Eind = 00:00 van de volgende dag UTC
+      const endDt = new Date(endDt0.getTime());
+      endDt.setUTCDate(endDt.getUTCDate() + 1);
+
+      const startISO = startDt.toISOString();
+      const endISO   = endDt.toISOString();
+
+      status.textContent = '⏳ Laden…';
 
       try {
-        debug("🔍 Starting download process…");
+        // Bouw query string
+        const qs = new URLSearchParams({
+          ean:       eans,
+          start:     startISO,
+          end:       endISO,
+          type,
+          direction,
+          limit
+        });
+        const endpoint = "/.netlify/functions/getReading";
 
-        const ean       = document.getElementById('ean').value.trim();
-        const startVal  = document.getElementById('start').value;
-        const endVal    = document.getElementById('end').value;
-        const type      = document.getElementById('type').value;
-        const direction = document.getElementById('direction').value;
-
-        if (!ean || !startVal || !endVal) {
-          debug("❗ Validation failed: missing input.");
-          return alert('Vul alstublieft EAN, start- en einddatum in.');
-        }
-        debug(`EAN=${ean}, start="${startVal}", end="${endVal}", type=${type}, direction=${direction}`);
-
-        const startISO = new Date(startVal).toISOString();
-        const endISO   = new Date(endVal).toISOString();
-        debug(`Converted to ISO: start=${startISO}, end=${endISO}`);
-
-        const qs = new URLSearchParams({ ean, start: startISO, end: endISO, type, direction });
-        const url = `/.netlify/functions/getReading?${qs}`;
-        debug(`Request URL: ${url}`);
-
-        const res = await fetch(url);
-        debug(`Fetch completed with status ${res.status}`);
+        console.log("🛰 Fetching", endpoint + "?" + qs);
+        const res = await fetch(endpoint + "?" + qs);
+        console.log("↩️ HTTP status", res.status);
 
         if (!res.ok) {
           const txt = await res.text();
-          debug(`❌ Server returned error: ${txt}`);
-          return alert(`Fout ${res.status}: ${txt}`);
+          throw new Error(`Server gaf ${res.status}: ${txt}`);
         }
 
         const data = await res.json();
-        debug(`Received ${data.length} records`);
+        console.log("📦 Ontvangen rijen:", data.length);
 
-        if (!Array.isArray(data) || data.length === 0) {
-          debug("⚠️ Received empty or invalid data array.");
-          return alert("Geen data gevonden voor deze parameters.");
+        if (!data.length) {
+          status.textContent = '⚠️ Geen data gevonden.';
+        } else {
+          // Map naar lokaal geformatteerde datum/tijd en waarde
+          const sheetData = data.map(r => ({
+            Datum: new Date(r.datetime).toLocaleString('nl-NL', {
+              day:   '2-digit',
+              month: '2-digit',
+              year:  'numeric',
+              hour:  '2-digit',
+              minute:'2-digit'
+            }),
+            Waarde: r.value
+          }));
+
+          // Bouw werkblad en stel kolombreedtes in
+          const ws = XLSX.utils.json_to_sheet(sheetData);
+          ws['!cols'] = [{ wch: 20 }, { wch: 12 }];
+
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'Kwartierdata');
+          XLSX.writeFile(wb, `kwartierdata_${eans}_${startRaw}.xlsx`);
+
+          status.textContent = '✅ Download gestart.';
         }
 
-        // Turn JSON into worksheet and trigger download
-        debug("🛠️ Generating Excel workbook…");
-        const ws = XLSX.utils.json_to_sheet(data);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Kwartierdata');
-        XLSX.writeFile(wb, `kwartierdata_${ean}.xlsx`);
-        debug("✅ Download triggered successfully.");
-
       } catch (err) {
-        debug(`💥 Exception caught: ${err.message}`);
         console.error(err);
-        alert("Er is een fout opgetreden. Kijk de debug‑log hieronder.");
+        status.textContent = `💥 Fout: ${err.message}`;
+      } finally {
+        btn.disabled = false;
       }
-    };
+    });
   </script>
 </body>
 </html>
