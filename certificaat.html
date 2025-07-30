@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <title>GVO Certificaat Generator</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: 2em auto;
+      line-height: 1.5;
+    }
+    fieldset {
+      margin-bottom: 1.5em;
+      padding: 1em;
+      border: 1px solid #ccc;
+    }
+    legend {
+      font-weight: bold;
+    }
+    label.inline {
+      display: block;
+      margin: .5em 0;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+    button {
+      padding: .6em 1.2em;
+      font-size: 1em;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>GVO Certificaat Generator</h1>
+
+  <form id="mainForm">
+    <!-- 1) Bestand uploads -->
+    <fieldset>
+      <legend>1) Upload bestanden</legend>
+      <label class="inline">
+        Excel (.xlsx):
+        <input type="file" id="excelFile" name="excel" accept=".xlsx" required>
+      </label>
+      <label class="inline">
+        Word-template (.docx):
+        <input type="file" id="docxFile" name="docx" accept=".docx" required>
+      </label>
+    </fieldset>
+
+    <!-- 2) Placeholder overrides -->
+    <fieldset>
+      <legend>2) Vervang placeholders</legend>
+      <label class="inline">
+        KOLOM A (klantnaam):
+        <input type="text" id="overrideA" placeholder="Bijv. Acme BV">
+      </label>
+      <label class="inline">
+        KOLOM B (EAN):
+        <input type="text" id="overrideB" placeholder="Bijv. 1234567890123">
+      </label>
+      <label class="inline">
+        KOLOM C (straat):
+        <input type="text" id="overrideC" placeholder="Bijv. Kerkstraat 1">
+      </label>
+      <label class="inline">
+        KOLOM D (stad):
+        <input type="text" id="overrideD" placeholder="Bijv. Amsterdam">
+      </label>
+      <label class="inline">
+        Datum (in plaats van “Datum: van vandaag”):
+        <input type="text" id="overrideDate" value="">
+      </label>
+    </fieldset>
+
+    <!-- 3) Optionele filters -->
+    <fieldset>
+      <legend>3) Optionele filters</legend>
+      <label class="inline">
+        Klantnaam filter:
+        <input type="text" id="filterKlant" name="klant" placeholder="Exact klantnaam">
+      </label>
+      <label class="inline">
+        EAN filter:
+        <input type="text" id="filterEAN" name="ean" placeholder="Exact EAN">
+      </label>
+      <label class="inline">
+        Straat filter:
+        <input type="text" id="filterStraat" name="adres" placeholder="Substring match">
+      </label>
+    </fieldset>
+
+    <button type="submit">Genereer &amp; Download ZIP</button>
+  </form>
+
+  <script>
+    // Pre-fill today's date in Dutch format if desired:
+    document.getElementById('overrideDate').value = new Date()
+      .toLocaleDateString('nl-NL');
+
+    document.getElementById('mainForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const form = e.target;
+      const data = new FormData();
+
+      // files
+      data.append('excel', form.excel.files[0]);
+      data.append('docx',  form.docx.files[0]);
+
+      // overrides (map to safe field names)
+      const map = {
+        'KOLOM A': document.getElementById('overrideA').value,
+        'KOLOM B': document.getElementById('overrideB').value,
+        'KOLOM C': document.getElementById('overrideC').value,
+        'KOLOM D': document.getElementById('overrideD').value,
+        'Datum: van vandaag': document.getElementById('overrideDate').value
+      };
+      for (let [key, val] of Object.entries(map)) {
+        const fieldName = key.replace(/[^A-Za-z0-9]/g, '_');
+        if (val) data.append(fieldName, val);
+      }
+
+      // filters
+      data.append('klant', form.klant.value);
+      data.append('ean',   form.ean.value);
+      data.append('adres', form.adres.value);
+
+      // send to your Lambda via API Gateway
+      const resp = await fetch(
+        'https://JOUW-API-ID.execute-api.eu-west-1.amazonaws.com/prod/generate',
+        { method: 'POST', body: data }
+      );
+      if (!resp.ok) {
+        const err = await resp.json().catch(()=>null);
+        return alert('Fout: ' + (err?.error || resp.statusText));
+      }
+
+      // trigger download of returned ZIP
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'certificates.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <title>Maandrapportage Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+    .container { max-width: 700px; margin: auto; background: #fff; padding: 20px;
+                 border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display: block; font-weight: bold; margin-top: 12px; }
+    input, select, button { width: 100%; padding: 8px; margin-top:6px; border:1px solid #ccc; border-radius:4px; }
+    button { background: #007bff; color: white; border: none; cursor: pointer; margin-top: 16px; }
+    button:hover { background: #0056b3; }
+    .status { margin-top: 16px; padding: 10px; background: #eee; border-radius: 4px;
+              white-space: pre-wrap; height: auto; color: #333; }
+    .status.error { background: #ffd6d6; color: #900; }
+    .status.success { background: #d6ffd6; color: #090; }
+    #downloadLink { display: block; margin-top: 1em; font-weight: bold; }
+    progress { width: 100%; margin-top: 12px; height: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Maandrapportage Generator</h2>
+
+    <label for="fileData3">1) Data inladen :</label>
+    <input type="file" id="fileData3" accept=".xlsx">
+
+    <label for="fileData3">1) Data inladen voor corendon :</label>
+    <input type="file" id="fileData3" accept=".xlsx">
+
+    <label for="clientSelect">2) Kies klant en mode:</label>
+    <select id="clientSelect">
+      <option value="Qrent"        data-mode="multi">Qrent</option>
+      <option value="Talent!"      data-mode="single">Talent!</option>
+      <option value="Kamminga Makelaars"     data-mode="single">Kamminga Makelaars</option>
+      <option value="Louis Manche" data-mode="multi">Louis Manche</option>
+      <option value="Corendon"     data-mode="multi">Corendon</option>
+      <option value="Wim de Vries" data-mode="multi">Wim de Vries</option>
+      <option value="MAC3PARK B.V." data-mode="multi">MAC3PARK B.V.</option>
+      <option value="ESKO" data-mode="single">ESKO</option>
+    </select>
+
+    <button id="generateBtn">3) Genereer Rapport</button>
+
+    <progress id="progressBar" value="0" max="100"></progress>
+    <div class="status" id="status">Status…</div>
+    <a id="downloadLink" href="#" style="display:none;">Download rapport</a>
+  </div>
+
+  <script>
+    // Your Lambda Function URL
+    const FUNCTION_URL = "https://edzstcknibvvql5phcxwjfvrse0nfztt.lambda-url.eu-central-1.on.aws";
+    const PRESIGN_URL  = `${FUNCTION_URL}/presign`;
+    const REPORT_URL   = `${FUNCTION_URL}/maand`;
+
+    const statusEl     = document.getElementById('status');
+    const downloadLink = document.getElementById('downloadLink');
+    const progressBar  = document.getElementById('progressBar');
+
+    function setStatus(text, type='') {
+      statusEl.textContent = text;
+      statusEl.className = 'status' + (type ? ' ' + type : '');
+    }
+    function appendLog(text) {
+      statusEl.textContent += '\n' + text;
+    }
+    function setProgress(pct) {
+      progressBar.value = pct;
+    }
+
+    async function uploadFile(inputId) {
+      const file = document.getElementById(inputId).files[0];
+      if (!file) throw new Error(`Selecteer eerst ${inputId}`);
+
+      setStatus(`Presigning ${file.name}…`);
+      const presignResp = await fetch(`${PRESIGN_URL}?name=${encodeURIComponent(file.name)}`);
+      if (!presignResp.ok) throw new Error(`Presign fout (${presignResp.status})`);
+      const { url, key } = await presignResp.json();
+
+      appendLog(`Uploading ${file.name}…`);
+      const putResp = await fetch(url, {
+        method: 'PUT', headers: { 'Content-Type': file.type }, body: file
+      });
+      if (!putResp.ok) throw new Error(`Upload ${file.name} mislukt (${putResp.status})`);
+      return key;
+    }
+
+    document.getElementById('generateBtn').onclick = async () => {
+      try {
+        setProgress(0);
+        setStatus('Start proces…');
+        downloadLink.style.display = 'none';
+
+        // 1) upload raw data only
+        setProgress(10);
+        const key1 = await uploadFile('fileData3');
+        setProgress(50);
+
+        // 2) request report
+        appendLog('Aanvragen rapport…');
+        setStatus('Generating report…');
+        const clientEl = document.getElementById('clientSelect');
+        const payload = {
+          RAW_DATA_KEY: key1,
+          CLIENT_NAME:  clientEl.value,
+          MODE:         clientEl.selectedOptions[0].dataset.mode
+        };
+
+        setProgress(60);
+        const reportResp = await fetch(REPORT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!reportResp.ok) {
+          const err = await reportResp.text();
+          throw new Error(`Report fout (${reportResp.status}): ${err}`);
+        }
+        setProgress(75);
+
+        // 3) receive and prepare download
+        appendLog('Ontvangen, verwerken…');
+        const buf = await reportResp.arrayBuffer();
+        setProgress(85);
+        const hdr = new Uint8Array(buf.slice(0,4));
+        if (hdr[0]!==0x50 || hdr[1]!==0x4B) throw new Error('Geen geldig XLSX.');
+
+        const blob     = new Blob([buf], { type: reportResp.headers.get('Content-Type') });
+        const url      = URL.createObjectURL(blob);
+        const filename = `${clientEl.value}_maandrapportage.xlsx`;
+        downloadLink.href     = url;
+        downloadLink.download = filename;
+        downloadLink.textContent = `Download rapport`;
+        downloadLink.style.display = 'block';
+        setProgress(100);
+      }
+      catch (e) {
+        setStatus(e.message, 'error');
+        console.error(e);
+        setProgress(0);
+      }
+    };
+  </script>
+</body>
+</html>

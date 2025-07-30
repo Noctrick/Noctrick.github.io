@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Merge IKH TELE Files</title>
+  <style>
+    .progress-container { margin-bottom: 15px; }
+    .progress-label { font-size: 14px; margin-bottom: 5px; }
+    .progress-bar { width: 0%; height: 20px; background: green; transition: width 0.2s; }
+    .progress-stage { font-size: 12px; color: #555; margin-top: 2px; }
+    #status { margin-top: 20px; font-weight: bold; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Merge IKH TELE Files</h1>
+  <input type="file" id="files" multiple accept=".xls,.xlsx" />
+  <div id="progress-area"></div>
+  <button onclick="uploadAndMerge()">Upload & Merge</button>
+  <div id="status"></div>
+
+  <script>
+    const functionUrl = "https://pfbvzy4utiaf6mbal7lhfi2ube0tpoqe.lambda-url.eu-central-1.on.aws/";
+
+    async function uploadAndMerge() {
+      const files = document.getElementById("files").files;
+      const area = document.getElementById("progress-area");
+      const status = document.getElementById("status");
+      area.innerHTML = "";
+      status.innerText = "";
+
+      if (!files.length) {
+        alert("Please select files");
+        return;
+      }
+
+      // --- Upload each file with detailed stage updates ---
+      for (let file of files) {
+        const cont = document.createElement("div");
+        cont.className = "progress-container";
+
+        const lbl = document.createElement("div");
+        lbl.className = "progress-label";
+        lbl.innerText = file.name;
+
+        const bar = document.createElement("div");
+        bar.className = "progress-bar";
+
+        const stage = document.createElement("div");
+        stage.className = "progress-stage";
+        stage.innerText = "Queued";
+
+        cont.append(lbl, bar, stage);
+        area.appendChild(cont);
+
+        try {
+          // 1) Request presigned URL
+          stage.innerText = "Requesting upload URL...";
+          let res = await fetch(`${functionUrl}?name=${encodeURIComponent(file.name)}`);
+          let txt = await res.text();
+          if (!res.ok) throw new Error(`Presign error: ${txt}`);
+          let { url, key } = JSON.parse(txt);
+          stage.innerText = "Got upload URL";
+
+          // 2) Start upload
+          stage.innerText = "Starting upload...";
+          await new Promise((resolve, reject) => {
+            let xhr = new XMLHttpRequest();
+            xhr.open("PUT", url);
+            xhr.setRequestHeader("Content-Type", file.type);
+            xhr.upload.onprogress = e => {
+              if (e.lengthComputable) {
+                bar.style.width = ((e.loaded / e.total) * 100).toFixed(1) + "%";
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                bar.style.width = "100%";
+                stage.innerText = "Upload complete";
+                resolve();
+              } else {
+                reject(new Error(`Upload failed: ${xhr.status}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error("Network error during upload"));
+            xhr.send(file);
+          });
+
+        } catch (err) {
+          console.error(err);
+          stage.innerText = `Error: ${err.message}`;
+          bar.style.background = "red";
+          // stop further uploads
+          return;
+        }
+      }
+
+      // --- All uploads done ---
+      status.innerText = "All uploads complete. Requesting merge…";
+
+      // 3) Trigger merge
+      try {
+        status.innerText = "Sending merge request…";
+        const mergeRes = await fetch(functionUrl, { method: "POST" });
+        const txt = await mergeRes.text();
+
+        if (!mergeRes.ok) {
+          console.error("Merge failed:", mergeRes.status, txt);
+          status.innerText = `Merge failed (${mergeRes.status}): see console`;
+          return;
+        }
+
+        let result = JSON.parse(txt);
+        if (result.download_url) {
+          status.innerText = "Merge successful! Downloading…";
+          window.location.href = result.download_url;
+        } else {
+          console.error("Invalid merge response:", result);
+          status.innerText = "Merge failed: invalid response";
+        }
+
+      } catch (err) {
+        console.error("Error during merge:", err);
+        status.innerText = `Error during merge: ${err.message}`;
+      }
+    }
+  </script>
+</body>
+</html>

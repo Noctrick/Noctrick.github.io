@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GV100 Energy & Cost Calculator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; max-width: 600px; }
+    label { display: block; margin-top: 1em; }
+    input[type="file"] { margin-top: 0.25em; }
+    button { margin-top: 1.5em; padding: 0.75em 1.5em; background: #3498db; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #aaa; }
+    #status { margin-top: 1em; font-style: italic; }
+    #downloadLink { display: block; margin-top: 1.5em; font-weight: bold; text-decoration: none; color: #3498db; }
+    #downloadLink:hover { text-decoration: underline; }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 3px solid #f3f3f3; border-top: 3px solid #3498db;
+      border-radius: 50%; animation: spin 1s linear infinite;
+      vertical-align: middle; margin-left: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <h1>GV100 Energy & Cost Calculator</h1>
+
+  <label>Main workbook:
+    <input type="file" id="mainFile" accept=".xlsm,.xls,.xlsx" />
+  </label>
+
+  <label>GV_data.xlsx:
+    <input type="file" id="gvFile" accept=".xlsx" />
+  </label>
+
+  <label>EPEX.xlsx:
+    <input type="file" id="epexFile" accept=".xlsx" />
+  </label>
+
+  <label>Maandverbruiken.xlsx:
+    <input type="file" id="verbruikFile" accept=".xlsx" />
+  </label>
+
+  <label>Maandproductie.xlsx:
+    <input type="file" id="opwekFile" accept=".xlsx" />
+  </label>
+
+  <button id="calculateBtn">Calculate Results</button>
+  <div id="status"></div>
+  <a id="downloadLink" style="display:none;"></a>
+
+  <!-- Axios for HTTP requests -->
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script>
+    // Your API Gateway base URL
+    const API_BASE = 'https://oat2esbgqd.execute-api.eu-central-1.amazonaws.com/prod';
+
+    // Helper: get presigned URL + key, then upload file to S3
+    async function presignAndUpload(file) {
+      console.log('Requesting presigned URL for', file.name);
+      const presignResp = await axios.post(${API_BASE}/bucketcalc, {
+        filename: file.name
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const { uploadUrl, key } = presignResp.data;
+      console.log('Uploading to S3 key', key);
+      await axios.put(uploadUrl, file, {
+        headers: { 'Content-Type': file.type }
+      });
+      return key;
+    }
+
+    document.getElementById('calculateBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('calculateBtn');
+      const status = document.getElementById('status');
+      const downloadLink = document.getElementById('downloadLink');
+
+      // Reset UI
+      status.textContent = '';
+      downloadLink.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Processing';
+      const spinner = document.createElement('span');
+      spinner.className = 'spinner';
+      btn.appendChild(spinner);
+
+      try {
+        // Map input IDs to the names your Lambda expects
+        const mapping = [
+          ['mainFile',    'main_key'],
+          ['gvFile',      'gv_key'],
+          ['epexFile',    'epex_key'],
+          ['verbruikFile','verbruik_key'],
+          ['opwekFile',   'opwek_key']
+        ];
+        const payload = {};
+
+        // Upload each file and record its S3 key
+        for (let [inputId, propName] of mapping) {
+          const fileInput = document.getElementById(inputId);
+          if (!fileInput.files.length) {
+            throw new Error('Please select all five files.');
+          }
+          const file = fileInput.files[0];
+          payload[propName] = await presignAndUpload(file);
+        }
+
+        console.log('Calling /calculate with payload:', payload);
+        const calcResp = await axios.post(${API_BASE}/calculate, payload, {
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        const { file_data, filename, contentType } = calcResp.data;
+        // Build and show the download link
+        const blob = new Blob(
+          [Uint8Array.from(atob(file_data), c => c.charCodeAt(0))],
+          { type: contentType }
+        );
+        const url = URL.createObjectURL(blob);
+        downloadLink.href = url;
+        downloadLink.download = filename;
+        downloadLink.textContent = Download ${filename};
+        downloadLink.style.display = 'block';
+
+        status.textContent = 'Done!';
+      } catch (err) {
+        console.error(err);
+        status.textContent = 'Error: ' + (
+          err.response?.data?.error ||
+          err.message ||
+          'Network or server error'
+        );
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Calculate Results';
+      }
+    });
+  </script>
+</body>
+</html>
