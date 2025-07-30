@@ -3,7 +3,3 @@
   publish = "."      # your static files live in the repo root
   functions = "netlify/functions"
 
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to   = "/.netlify/functions/:splat"
-  status = 200
