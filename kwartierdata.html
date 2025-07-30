@@ -1,42 +1,129 @@
-<!-- in <head> or before </body> -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kwartierdata Export</title>
+  <!-- SheetJS for Excel export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-
-  EAN: <input id="ean" placeholder="871687120057248244"><br>
-  Start: <input id="start" type="datetime-local"><br>
-  End:   <input id="end"   type="datetime-local"><br>
-  Type: 
-    <select id="type">
-      <option>Elektriciteit</option>
-      <option>Gas</option>
-    </select><br>
-  Direction:
-    <select id="direction">
-      <option>Levering</option>
-      <option>Teruglevering</option>
-    </select><br>
-  <button id="download">Download Excel</button>
-  
-  <script>
-  document.getElementById('download').onclick = async () => {
-    const ean       = document.getElementById('ean').value;
-    const startISO  = new Date(document.getElementById('start').value).toISOString();
-    const endISO    = new Date(document.getElementById('end').value).toISOString();
-    const type      = document.getElementById('type').value;
-    const direction = document.getElementById('direction').value;
-  
-    const qs = new URLSearchParams({ ean, start: startISO, end: endISO, type, direction });
-    const res = await fetch(`/.netlify/functions/getReadings?${qs}`);
-    if (!res.ok) {
-      const txt = await res.text();
-      return alert(`Error ${res.status}: ${txt}`);
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 2rem auto;
+      padding: 1rem;
     }
-    const data = await res.json(); // [{datetime,value},...]
-  
-    // turn into sheet & download
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Readings');
-    XLSX.writeFile(wb, `readings_${ean}.xlsx`);
-  };
+    label, select, input, button {
+      display: block;
+      margin: 0.5rem 0;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+    }
+    #debug {
+      white-space: pre-wrap;
+      background: #f9f9f9;
+      border: 1px solid #ddd;
+      padding: 0.5rem;
+      margin-top: 1rem;
+      color: #444;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Kwartierdata Export</h1>
+
+  <label for="ean">EAN:</label>
+  <input id="ean" placeholder="871687120057248244">
+
+  <label for="start">Start:</label>
+  <input id="start" type="datetime-local">
+
+  <label for="end">End:</label>
+  <input id="end" type="datetime-local">
+
+  <label for="type">Type aansluiting:</label>
+  <select id="type">
+    <option>Elektriciteit</option>
+    <option>Gas</option>
+  </select>
+
+  <label for="direction">Direction:</label>
+  <select id="direction">
+    <option>Levering</option>
+    <option>Teruglevering</option>
+  </select>
+
+  <button id="download">Download Excel</button>
+
+  <div id="debug"></div>
+
+  <script>
+    const dbgEl = document.getElementById('debug');
+    function debug(msg) {
+      console.log(msg);
+      dbgEl.textContent += msg + "\n";
+    }
+
+    document.getElementById('download').onclick = async () => {
+      dbgEl.textContent = ''; // clear previous debug
+
+      try {
+        debug("🔍 Starting download process…");
+
+        const ean       = document.getElementById('ean').value.trim();
+        const startVal  = document.getElementById('start').value;
+        const endVal    = document.getElementById('end').value;
+        const type      = document.getElementById('type').value;
+        const direction = document.getElementById('direction').value;
+
+        if (!ean || !startVal || !endVal) {
+          debug("❗ Validation failed: missing input.");
+          return alert('Vul alstublieft EAN, start- en einddatum in.');
+        }
+        debug(`EAN=${ean}, start="${startVal}", end="${endVal}", type=${type}, direction=${direction}`);
+
+        const startISO = new Date(startVal).toISOString();
+        const endISO   = new Date(endVal).toISOString();
+        debug(`Converted to ISO: start=${startISO}, end=${endISO}`);
+
+        const qs = new URLSearchParams({ ean, start: startISO, end: endISO, type, direction });
+        const url = `/.netlify/functions/getReadings?${qs}`;
+        debug(`Request URL: ${url}`);
+
+        const res = await fetch(url);
+        debug(`Fetch completed with status ${res.status}`);
+
+        if (!res.ok) {
+          const txt = await res.text();
+          debug(`❌ Server returned error: ${txt}`);
+          return alert(`Fout ${res.status}: ${txt}`);
+        }
+
+        const data = await res.json();
+        debug(`Received ${data.length} records`);
+
+        if (!Array.isArray(data) || data.length === 0) {
+          debug("⚠️ Received empty or invalid data array.");
+          return alert("Geen data gevonden voor deze parameters.");
+        }
+
+        // Turn JSON into worksheet and trigger download
+        debug("🛠️ Generating Excel workbook…");
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Kwartierdata');
+        XLSX.writeFile(wb, `kwartierdata_${ean}.xlsx`);
+        debug("✅ Download triggered successfully.");
+
+      } catch (err) {
+        debug(`💥 Exception caught: ${err.message}`);
+        console.error(err);
+        alert("Er is een fout opgetreden. Kijk de debug‑log hieronder.");
+      }
+    };
   </script>
-  
+</body>
+</html>
