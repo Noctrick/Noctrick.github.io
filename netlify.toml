@@ -1,5 +1,7 @@
-# netlify.toml
 [build]
-  publish = "."      # your static files live in the repo root
-  functions = "netlify/functions"
+  publish   = "."                   # serve your HTML from the repo root
+  functions = "netlify/functions"   # look here for your JS lambdas
 
+[dev]
+  functions = "netlify/functions"   # ensure `netlify dev` knows where to look
+    

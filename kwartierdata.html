@@ -90,7 +90,7 @@
         debug(`Converted to ISO: start=${startISO}, end=${endISO}`);
 
         const qs = new URLSearchParams({ ean, start: startISO, end: endISO, type, direction });
-        const url = `/.netlify/functions/getReadings?${qs}`;
+        const url = `/.netlify/functions/getReading?${qs}`;
         debug(`Request URL: ${url}`);
 
         const res = await fetch(url);
